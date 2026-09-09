@@ -1,0 +1,10 @@
+{
+  "name": "@zachshotamartin/image-rasterizer",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "exports": { ".": "./src/index.js", "./style.css": "./src/style.css" },
+  "scripts": { "dev": "vite --host 127.0.0.1 --port 5183", "build": "vite build", "test": "node --test tests/*.test.js", "test:browser": "playwright test", "capture": "node scripts/capture.mjs" },
+  "engines": { "node": ">=22" },
+  "devDependencies": { "@playwright/test": "^1.58.2", "vite": "^8.2.1" }
+}
