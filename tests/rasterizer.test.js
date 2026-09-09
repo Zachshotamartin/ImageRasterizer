@@ -66,3 +66,14 @@ test('OBJ rejects malformed, zero, missing and out-of-range indices',()=>{for(co
 test('OBJ rejects concave, nonplanar and zero-area faces instead of incorrect triangulation',()=>{assert.throws(()=>parseOBJ('v 0 0 0\nv 2 0 0\nv 1 .5 0\nv 2 2 0\nv 0 2 0\nf 1 2 3 4 5'),/concave/);assert.throws(()=>parseOBJ('v 0 0 0\nv 1 0 0\nv 1 1 0\nv 0 1 1\nf 1 2 3 4'),/nonplanar/);assert.throws(()=>parseOBJ('v 0 0 0\nv 1 0 0\nv 2 0 0\nf 1 2 3'),/zero-area/);});
 test('OBJ triangle cap is checked before constructing rendered arrays',()=>{assert.throws(()=>parseOBJ('v 0 0 0\nv 1 0 0\nv 0 1 0\n'+'f 1 2 3\n'.repeat(2001)),/2,000/);});
 test('image header dimensions are validated before decoding',()=>{const data=new Uint8Array(24);data.set([137,80,78,71],0);data.set([73,72,68,82],12);const view=new DataView(data.buffer);view.setUint32(16,512);view.setUint32(20,256);assert.deepEqual(imageDimensions(data.buffer,'image/png'),{width:512,height:256});view.setUint32(16,20000);assert.throws(()=>imageDimensions(data.buffer,'image/png'),/4,096/);assert.throws(()=>imageDimensions(new ArrayBuffer(2),'image/jpeg'),/valid/);});
+
+test('uncovered samples stay transparent while rasterized geometry stays opaque',()=>{
+  const frame=rasterize([tri(0)],{width:24,height:24});
+  let clear=0,covered=0;
+  for(let i=0;i<frame.ids.length;i++){
+    const alpha=frame.rgba[i*4+3];
+    if(frame.ids[i]<0){assert.equal(alpha,0);clear++;}
+    else{assert.equal(alpha,255);covered++;}
+  }
+  assert.ok(clear>0&&covered>0);
+});
