@@ -3,6 +3,7 @@ import { parseOBJ, OBJ_LIMITS } from './core/obj.js';
 import { inspectPixel } from './core/rasterizer.js';
 import { clamp } from './core/math.js';
 import { imageDimensions } from './core/image.js';
+import { isWithinRenderMargin, RENDER_MARGIN } from './visibility.js';
 
 export const metadata={
   id:'image-rasterizer',title:'Image Rasterizer',
@@ -13,7 +14,7 @@ export const metadata={
 };
 
 export function mountExperiment(element,options={}) {
-  const root=document.createElement('section');root.className='image-rasterizer';root.setAttribute('aria-label','Image Rasterizer');element.append(root);
+  const root=document.createElement('section');root.className='image-rasterizer';root.setAttribute('aria-label','Image Rasterizer');root.dataset.renderState='pending';root.dataset.completedFrames='0';element.append(root);
   root.innerHTML=`
     <header class="ir-heading"><div><p class="ir-kicker">A pixel at a time</p><h2>Image Rasterizer</h2><p>A 3D scene, built entirely on the CPU. Follow each triangle into the image.</p></div><span class="ir-engine">Canvas 2D · Web Worker</span></header>
     <ol class="ir-pipeline" aria-label="Rendering pipeline"><li>Transform</li><li>Clip</li><li>Cover pixels</li><li>Test depth</li><li>Shade</li></ol>
@@ -35,15 +36,16 @@ export function mountExperiment(element,options={}) {
         <p class="ir-hint">Drag to orbit · Arrow keys rotate · + / − zoom · Click to inspect</p>
       </div>
     </div>
-    <div class="ir-bottom"><p class="ir-status" role="status" aria-live="polite">Starting renderer…</p><button type="button" data-action="cancel" hidden>Cancel render</button></div>
+    <div class="ir-bottom"><p class="ir-status" role="status" aria-live="polite">Starting renderer…</p></div>
     <details class="ir-explainer"><summary>How this image is made</summary><p>Vertices rotate into camera space, then clip against all six homogeneous frustum planes before perspective division. Edge functions test pixel centers with the top-left rule. The nearest normalized depth wins. Vertex color, UVs and normals use barycentric weights divided by clip W, then renormalized when perspective correction is on.</p><p>Depth view maps camera distances of 2 to 10 units from light to dark; the inspector reports the actual normalized depth buffer value. Wireframe shows edges of the visible surface. This renderer uses opaque triangles, one light, one sample per pixel, and clamp-to-edge textures. It has no GPU rendering, AI, shadows, mipmaps, materials, or network uploads. Imported polygons must be planar and convex; triangulate concave faces in your modeling app first.</p></details>`;
   if(options.embedded)root.querySelector('.ir-heading').remove();
   const $=selector=>root.querySelector(selector),control=name=>$(`[name="${name}"]`),button=name=>$(`[data-action="${name}"]`);
   const canvas=$('.ir-canvas'),ctx=canvas.getContext('2d'),controller=new AbortController(),signal=controller.signal;
-  let disposed=false,worker=null,busy=false,frame=null,renderID=0,debounce=0,playTimer=0,playing=false,visible=true,importID=0,customMesh=null,texture=null,selectedPixel=null,drag=null;
+  let disposed=false,worker=null,busy=false,frame=null,renderID=0,debounce=0,playTimer=0,playing=false,visible=isWithinRenderMargin(root.getBoundingClientRect(),window.innerWidth,window.innerHeight),importID=0,customMesh=null,texture=null,selectedPixel=null,drag=null;
+  let requestMetadata=null,frameMetadata=null,completedFrames=0;
   const downloadURLs=new Map();
   const state={scene:'geometry',mode:'shaded',width:480,height:360,perspective:true,textured:false,filter:'nearest',yaw:SCENES.geometry.yaw,pitch:SCENES.geometry.pitch,distance:SCENES.geometry.distance};
-  const status=message=>{$('.ir-status').textContent=message;};
+  const status=message=>{if($('.ir-status').textContent!==message)$('.ir-status').textContent=message;};
   const listen=(target,event,fn,extra={})=>target.addEventListener(event,fn,{...extra,signal});
   function sync() {
     for(const name of ['scene','mode','filter'])control(name).value=state[name];
@@ -57,34 +59,42 @@ export function mountExperiment(element,options={}) {
     $('.ir-frame-label').textContent=scene?.label||'Imported OBJ';
     button('play').textContent=playing?'Pause rotation':'Auto rotate';button('play').setAttribute('aria-pressed',String(playing));
   }
-  function stopWorker(){worker?.terminate();worker=null;busy=false;button('cancel').hidden=true;}
+  function stopWorker(){worker?.terminate();worker=null;busy=false;}
   function ensureWorker() {
     if(worker)return;
     worker=new Worker(new URL('./render.worker.js',import.meta.url),{type:'module'});
     worker.onmessage=({data})=>{
       if(disposed||data.id!==renderID)return;
-      busy=false;button('cancel').hidden=true;
-      if(data.error){status(data.error);setPlaying(false);button('export').disabled=true;return;}
-      frame=data.frame;canvas.width=frame.width;canvas.height=frame.height;ctx.putImageData(new ImageData(frame.rgba,frame.width,frame.height),0,0);
+      busy=false;
+      if(data.error){root.dataset.renderState='error';status(data.error);setPlaying(false);return;}
+      frame=data.frame;frameMetadata=requestMetadata;canvas.width=frame.width;canvas.height=frame.height;ctx.putImageData(new ImageData(frame.rgba,frame.width,frame.height),0,0);
       button('export').disabled=false;
       $('.ir-stats [data-stat="triangles"]').textContent=`${frame.stats.inputTriangles.toLocaleString()} triangles → ${frame.stats.clippedTriangles.toLocaleString()} after clipping`;
       $('[data-stat="pixels"]').textContent=`${frame.stats.visiblePixels.toLocaleString()} pixels · ${(frame.stats.candidates/1e6).toFixed(2)}M / 24M samples`;
       $('[data-stat="time"]').textContent=`${frame.stats.milliseconds.toFixed(1)} ms CPU`;
       control('pixel-x').max=frame.width-1;control('pixel-y').max=frame.height-1;
       if(!selectedPixel){control('pixel-x').value=Math.floor(frame.width/2);control('pixel-y').value=Math.floor(frame.height/2);}
-      status(`${frame.width} × ${frame.height} · ${state.mode==='depth'?'Near is light, far is dark.':state.perspective?'Perspective-correct attributes.':'Affine interpolation: attributes follow screen space.'}`);
+      status(`${frame.width} × ${frame.height} · ${frameMetadata.mode==='depth'?'Near is light, far is dark.':frameMetadata.perspective?'Perspective-correct attributes.':'Affine interpolation: attributes follow screen space.'}`);
       if(selectedPixel)showPixel(Math.round(selectedPixel[0]*(frame.width-1)),Math.round(selectedPixel[1]*(frame.height-1)));
+      root.dataset.completedFrames=String(++completedFrames);root.dataset.renderState='ready';
       if(playing&&visible&&!document.hidden)playTimer=setTimeout(()=>{state.yaw+=.035;if(state.yaw>Math.PI)state.yaw-=2*Math.PI;sync();schedule(0);},90);
     };
-    worker.onerror=()=>{if(disposed)return;stopWorker();setPlaying(false);status('The worker could not render. Reset to try again.');};
+    worker.onerror=()=>{if(disposed)return;stopWorker();setPlaying(false);root.dataset.renderState='error';status('The worker could not render. Reset to try again.');};
   }
   function render() {
-    if(disposed||!visible||document.hidden)return;
-    if(busy)stopWorker();ensureWorker();busy=true;button('cancel').hidden=false;button('export').disabled=true;
-    status('Rasterizing triangles in a worker…');
-    worker.postMessage({id:++renderID,triangles:state.scene==='custom'?customMesh.triangles:SCENES[state.scene].triangles,settings:{...state,texture}});
+    if(disposed)return;
+    if(!visible||document.hidden){visibilityChanged();return;}
+    if(busy)stopWorker();ensureWorker();busy=true;root.dataset.renderState='rendering';
+    if(!frame)status('Rasterizing triangles in a worker…');
+    requestMetadata={...state};
+    worker.postMessage({id:++renderID,triangles:state.scene==='custom'?customMesh.triangles:SCENES[state.scene].triangles,settings:{...requestMetadata,texture}});
   }
-  function schedule(delay=65){clearTimeout(debounce);clearTimeout(playTimer);if(busy){renderID++;stopWorker();}button('export').disabled=true;debounce=setTimeout(render,delay);}
+  function schedule(delay=65){
+    clearTimeout(debounce);clearTimeout(playTimer);if(busy){renderID++;stopWorker();}
+    if(disposed)return;
+    if(!visible||document.hidden){visibilityChanged();return;}
+    root.dataset.renderState='pending';debounce=setTimeout(render,delay);
+  }
   function setPlaying(value){playing=value;clearTimeout(playTimer);sync();if(playing)schedule(0);}
   function preset(name){state.scene=name;const scene=SCENES[name]||{yaw:-.25,pitch:.15,distance:6.5};Object.assign(state,{yaw:scene.yaw,pitch:scene.pitch,distance:scene.distance,textured:!!scene.textured});selectedPixel=null;$('.ir-reticle').hidden=true;$('.ir-pixel-data').hidden=true;$('.ir-pixel-intro').hidden=false;sync();schedule();}
   function showPixel(x,y){
@@ -104,21 +114,23 @@ export function mountExperiment(element,options={}) {
   for(const name of ['perspective','textured'])listen(control(name),'change',()=>{state[name]=control(name).checked;schedule();});
   for(const name of ['yaw','pitch','distance'])listen(control(name),'input',()=>{state[name]=Number(control(name).value)*(name==='distance'?1:Math.PI/180);sync();schedule();});
   listen(button('play'),'click',()=>setPlaying(!playing));
-  listen(button('cancel'),'click',()=>{renderID++;clearTimeout(debounce);stopWorker();setPlaying(false);button('export').disabled=true;status('Render cancelled. Change a control or reset to render again.');});
   listen(button('reset'),'click',()=>{importID++;setPlaying(false);texture=null;customMesh=null;control('scene').querySelector('[value="custom"]')?.remove();control('obj').value='';control('texture').value='';Object.assign(state,{mode:'shaded',width:480,height:360,perspective:true,filter:'nearest'});preset('geometry');});
   listen(button('checker'),'click',()=>{texture=null;control('texture').value='';state.textured=true;sync();schedule();});
   listen(button('inspect'),'click',()=>showPixel(Number(control('pixel-x').value)||0,Number(control('pixel-y').value)||0));
   listen(button('export'),'click',()=>{
-    if(!frame||busy)return;
-    const filename=`image-rasterizer-${state.scene}-${state.mode}-${frame.width}x${frame.height}.png`;
-    canvas.toBlob(blob=>{if(disposed||!blob)return;const url=URL.createObjectURL(blob),anchor=document.createElement('a');anchor.href=url;anchor.download=filename;anchor.click();downloadURLs.set(url,setTimeout(()=>{URL.revokeObjectURL(url);downloadURLs.delete(url);},1000));status('PNG exported at the rendered resolution.');},'image/png');
+    if(!frame)return;
+    const filename=`image-rasterizer-${frameMetadata.scene}-${frameMetadata.mode}-${frame.width}x${frame.height}.png`;
+    // Export an immutable snapshot of the completed frame, even while a newer request runs.
+    const snapshot=document.createElement('canvas');snapshot.width=frame.width;snapshot.height=frame.height;
+    snapshot.getContext('2d').putImageData(new ImageData(frame.rgba,frame.width,frame.height),0,0);
+    snapshot.toBlob(blob=>{if(disposed||!blob)return;const url=URL.createObjectURL(blob),anchor=document.createElement('a');anchor.href=url;anchor.download=filename;anchor.click();downloadURLs.set(url,setTimeout(()=>{URL.revokeObjectURL(url);downloadURLs.delete(url);},1000));status('PNG exported at the rendered resolution.');},'image/png');
   });
   listen(control('obj'),'change',async()=>{
-    const file=control('obj').files[0];if(!file)return;const token=++importID;setPlaying(false);renderID++;clearTimeout(debounce);stopWorker();status('Reading OBJ…');
-    try{if(file.size>OBJ_LIMITS.bytes)throw Error('OBJ must be smaller than 2 MB.');const parsed=parseOBJ(await file.text());if(disposed||token!==importID)return;customMesh=parsed;if(!control('scene').querySelector('[value="custom"]')){const option=document.createElement('option');option.value='custom';option.textContent='Imported OBJ';control('scene').append(option);}preset('custom');}catch(error){if(!disposed&&token===importID)status(error.message);}finally{control('obj').value='';}
+    const file=control('obj').files[0];if(!file)return;const token=++importID;setPlaying(false);renderID++;clearTimeout(debounce);stopWorker();root.dataset.renderState='pending';status('Reading OBJ…');
+    try{if(file.size>OBJ_LIMITS.bytes)throw Error('OBJ must be smaller than 2 MB.');const parsed=parseOBJ(await file.text());if(disposed||token!==importID)return;customMesh=parsed;if(!control('scene').querySelector('[value="custom"]')){const option=document.createElement('option');option.value='custom';option.textContent='Imported OBJ';control('scene').append(option);}preset('custom');}catch(error){if(!disposed&&token===importID){root.dataset.renderState='error';status(error.message);}}finally{control('obj').value='';}
   });
   listen(control('texture'),'change',async()=>{
-    const file=control('texture').files[0];if(!file)return;const token=++importID;setPlaying(false);renderID++;clearTimeout(debounce);stopWorker();status('Reading texture…');let bitmap;
+    const file=control('texture').files[0];if(!file)return;const token=++importID;setPlaying(false);renderID++;clearTimeout(debounce);stopWorker();root.dataset.renderState='pending';status('Reading texture…');let bitmap;
     try{
       if(!['image/png','image/jpeg','image/webp'].includes(file.type))throw Error('Use a PNG, JPEG or WebP texture.');
       if(file.size>8_000_000)throw Error('Texture must be smaller than 8 MB.');
@@ -126,7 +138,7 @@ export function mountExperiment(element,options={}) {
       bitmap=await createImageBitmap(file);if(disposed||token!==importID)return;
       if(bitmap.width>4096||bitmap.height>4096||!bitmap.width||!bitmap.height)throw Error('Texture dimensions must be between 1 and 4,096 pixels per side.');
       const ratio=Math.min(1,512/Math.max(bitmap.width,bitmap.height)),surface=document.createElement('canvas');surface.width=Math.max(1,Math.round(bitmap.width*ratio));surface.height=Math.max(1,Math.round(bitmap.height*ratio));const context=surface.getContext('2d',{willReadFrequently:true});context.fillStyle='#e7ece1';context.fillRect(0,0,surface.width,surface.height);context.drawImage(bitmap,0,0,surface.width,surface.height);texture={width:surface.width,height:surface.height,data:context.getImageData(0,0,surface.width,surface.height).data};state.textured=true;sync();schedule();
-    }catch(error){if(!disposed&&token===importID)status(error.message||'Unable to decode this image.');}finally{bitmap?.close();control('texture').value='';}
+    }catch(error){if(!disposed&&token===importID){root.dataset.renderState='error';status(error.message||'Unable to decode this image.');}}finally{bitmap?.close();control('texture').value='';}
   });
   listen(canvas,'pointerdown',event=>{if(event.button!==0)return;drag={id:event.pointerId,x:event.clientX,y:event.clientY,startX:event.clientX,startY:event.clientY,moved:false};canvas.setPointerCapture(event.pointerId);setPlaying(false);});
   listen(canvas,'pointermove',event=>{if(!drag||drag.id!==event.pointerId)return;const dx=event.clientX-drag.x,dy=event.clientY-drag.y;if(Math.hypot(event.clientX-drag.startX,event.clientY-drag.startY)>4)drag.moved=true;if(drag.moved){state.yaw+=dx*.009;state.yaw=((state.yaw+Math.PI)%(Math.PI*2)+Math.PI*2)%(Math.PI*2)-Math.PI;state.pitch=clamp(state.pitch+dy*.009,-1.39,1.39);sync();schedule();}drag.x=event.clientX;drag.y=event.clientY;});
@@ -137,11 +149,24 @@ export function mountExperiment(element,options={}) {
     if(key==='i'||key==='I'){showPixel(canvas.width/2,canvas.height/2);return;}
     if(key==='ArrowLeft')state.yaw-=.08;if(key==='ArrowRight')state.yaw+=.08;if(key==='ArrowUp')state.pitch=clamp(state.pitch-.08,-1.39,1.39);if(key==='ArrowDown')state.pitch=clamp(state.pitch+.08,-1.39,1.39);if(key==='+'||key==='=')state.distance=clamp(state.distance-.2,2.5,12);if(key==='-')state.distance=clamp(state.distance+.2,2.5,12);state.yaw=((state.yaw+Math.PI)%(Math.PI*2)+Math.PI*2)%(Math.PI*2)-Math.PI;sync();schedule();
   });
-  function visibilityChanged(){if(document.hidden||!visible){clearTimeout(debounce);clearTimeout(playTimer);renderID++;stopWorker();}else schedule(0);}
+  function visibilityChanged(){
+    if(disposed)return;
+    if(document.hidden||!visible){
+      clearTimeout(debounce);clearTimeout(playTimer);renderID++;stopWorker();
+      root.dataset.renderState='paused';
+      status(document.hidden?'Rendering paused while this tab is hidden.':'Rendering paused while this experiment is outside the viewport.');
+    }else schedule(0);
+  }
   listen(document,'visibilitychange',visibilityChanged);
-  const observer=new IntersectionObserver(entries=>{const next=entries[0].isIntersecting;if(next!==visible){visible=next;visibilityChanged();}},{rootMargin:'80px'});observer.observe(root);
+  const observer=new IntersectionObserver(entries=>{
+    // One target can cross the boundary repeatedly before a callback is delivered.
+    // The last record describes its current state; earlier records are stale.
+    const entry=entries.at(-1);
+    if(disposed||!entry)return;
+    if(entry.isIntersecting!==visible){visible=entry.isIntersecting;visibilityChanged();}
+  },{rootMargin:`${RENDER_MARGIN}px`});observer.observe(root);
   // The image keeps its raster aspect ratio while CSS responds to available embed width.
   const resizeObserver=new ResizeObserver(()=>{if(selectedPixel&&frame)showPixel(selectedPixel[0]*(frame.width-1),selectedPixel[1]*(frame.height-1));});resizeObserver.observe(canvas);
-  sync();schedule(0);
+  sync();if(visible&&!document.hidden)schedule(0);else visibilityChanged();
   return {dispose(){if(disposed)return;disposed=true;importID++;renderID++;clearTimeout(debounce);clearTimeout(playTimer);for(const [url,timer] of downloadURLs){clearTimeout(timer);URL.revokeObjectURL(url);}downloadURLs.clear();if(drag&&canvas.hasPointerCapture(drag.id))canvas.releasePointerCapture(drag.id);controller.abort();observer.disconnect();resizeObserver.disconnect();stopWorker();frame=null;texture=null;customMesh=null;root.remove();}};
 }

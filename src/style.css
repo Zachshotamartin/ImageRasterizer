@@ -1,4 +1,4 @@
-.image-rasterizer{--ir-bg:#142422;--ir-panel:#1c3029;--ir-text:#e7ece1;--ir-muted:#afc1b5;--ir-accent:#b8cd99;--ir-border:#9eaf983d;color:var(--ir-text);font:inherit;font-size:16px;line-height:1.5;max-width:1320px;margin:auto;box-sizing:border-box}
+.image-rasterizer{--ir-bg:#142321;--ir-panel:#1c3029;--ir-text:#e7ece1;--ir-muted:#afc1b5;--ir-accent:#b8cd99;--ir-border:#9eaf983d;color:var(--ir-text);font:inherit;font-size:16px;line-height:1.5;max-width:1320px;margin:auto;box-sizing:border-box}
 .image-rasterizer *{box-sizing:border-box}
 .image-rasterizer [hidden]{display:none!important}
 .image-rasterizer h2,.image-rasterizer h3,.image-rasterizer p{margin:0}
@@ -38,7 +38,7 @@
 .image-rasterizer .ir-output{min-width:0;background:var(--ir-panel);border:1px solid var(--ir-border);border-radius:3px;overflow:hidden}
 .image-rasterizer .ir-output-bar{padding:12px 16px;display:flex;align-items:center;justify-content:space-between;gap:12px;border-bottom:1px solid var(--ir-border)}
 .image-rasterizer .ir-frame-label{font-size:16px;font-weight:600}
-.image-rasterizer .ir-canvas-wrap{position:relative;background:rgb(24,43,38);aspect-ratio:4/3;width:100%}
+.image-rasterizer .ir-canvas-wrap{position:relative;background:#142321;aspect-ratio:4/3;width:100%}
 .image-rasterizer .ir-canvas{width:100%;height:100%;display:block;image-rendering:pixelated;touch-action:pan-y;cursor:grab}
 .image-rasterizer .ir-canvas:active{cursor:grabbing}
 .image-rasterizer .ir-reticle{position:absolute;width:16px;height:16px;border:2px solid #f3eacc;box-shadow:0 0 0 1px #142422;transform:translate(-50%,-50%);pointer-events:none}

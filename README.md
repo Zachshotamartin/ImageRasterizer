@@ -31,7 +31,7 @@ If Chromium is not installed, run `npx playwright install chromium`. Capture sta
 - Try Perspective checker with Perspective correction off to expose the two triangles' affine distortion. Nearest sample chooses one texel; Bilinear blend combines four.
 - Inspect Shaded, Wireframe, Depth, Normals, and UV coordinate views. Resolution ranges from 160 × 120 to 800 × 600.
 - Click a visible pixel, press I to inspect the center, or enter pixel coordinates and select Inspect. The inspector reads actual frame buffers and triangle data, including depth, screen barycentric weights, attribute weights, UVs, and RGB. Background pixels correctly have no triangle or depth.
-- Load a local OBJ mesh or PNG/JPEG/WebP texture. Files remain in the browser. Export PNG downloads the exact rendered image at its selected resolution. Reset clears imported assets and restores the default scene.
+- Load a local OBJ mesh or PNG/JPEG/WebP texture. Files remain in the browser. Export PNG stays available after the first completed frame and downloads that frame's exact pixels, dimensions and scene/view filename, including while a newer frame is rendering. Reset clears imported assets and restores the default scene.
 
 ![Perspective-correct checker rendered by the tool](examples/perspective.png)
 
@@ -54,7 +54,7 @@ Depth visualization maps camera distances of 2–10 units from light to dark. Th
 - Polygon faces must be planar, convex, and free of intersecting or collinear edges. Concave, nonplanar, self-intersecting and zero-area faces are rejected with useful errors; triangulate them in a modeling tool first. Materials, OBJ vertex-color extensions, lines, points and multiple object transforms are not supported.
 - Textures: PNG, JPEG or WebP, up to 8 MB and 4,096 pixels per side. Header dimensions are checked before bitmap decoding; the accepted image is resized to at most 512 pixels per side. Transparent pixels composite over pale sage. UVs clamp to the texture boundary.
 - One pixel-center sample; no antialiasing, mipmaps, gamma-correct filtering, backface culling, shadows, transparency, normal maps or material files. Highly detailed textures can alias. Shading works directly with display-encoded color values for an intentionally small educational pipeline.
-- Raster requests debounce, stale work is terminated and ignored, and Cancel render stops the worker. Animation schedules the next frame only after the previous result, with a 90 ms minimum idle interval. Hidden/offscreen views pause work. Disposal terminates workers, aborts listeners, disconnects observers, clears timers and releases pointer capture.
+- Raster requests debounce and superseded work is terminated and ignored automatically. Animation schedules the next frame only after the previous result, with a 90 ms minimum idle interval. Hidden/offscreen views pause work; batched visibility events use the latest state to resume. Disposal terminates workers, aborts listeners, disconnects observers, clears timers and releases pointer capture.
 - Mobile permits vertical page scrolling over the canvas. Camera sliders and arrow keys provide precise orbit control without requiring a drag gesture. Nothing auto-animates, including with reduced-motion preferences.
 
 ## Embed the same tool
@@ -69,6 +69,8 @@ experiment.dispose();
 ```
 
 `mountExperiment(element, options = {})` owns one DOM subtree and returns `{ dispose() }` synchronously. `embedded: true` omits its standalone heading for hosts that already provide a title; controls and rendering are identical. `assetBase` is accepted but unnecessary: the worker uses `new URL(..., import.meta.url)` and assets are packaged modules. CSS is scoped beneath `.image-rasterizer` and inherits the host font. Use a Vite-compatible module/worker build and allow worker loading in your host CSP.
+
+For integration checks, the `.image-rasterizer` root exposes `data-render-state` (`pending`, `rendering`, `ready`, `paused`, or `error`) and `data-completed-frames` (a monotonically increasing count starting at 0). Scheduling sets `pending` synchronously. Wait for `ready` to assert updated pixels; Export PNG remains enabled for the last completed frame during later requests or pauses.
 
 ## References
 

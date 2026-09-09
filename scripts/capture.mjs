@@ -8,7 +8,7 @@ try {
   for(let i=0;i<80;i++){try{if((await fetch(url)).ok)break;}catch{}await new Promise(resolve=>setTimeout(resolve,100));}
   await mkdir('examples',{recursive:true});browser=await chromium.launch({channel:'chromium'});
   const page=await browser.newPage({viewport:{width:1600,height:1400},deviceScaleFactor:1,reducedMotion:'reduce'});
-  await page.goto(url);const ready=()=>page.locator('[data-action="export"]:not([disabled])').waitFor();await ready();
+  await page.goto(url);const ready=()=>page.locator('.image-rasterizer[data-render-state="ready"]').waitFor();await ready();
   for(const scene of ['torus','geometry','perspective']) {
     await page.getByLabel('Scene',{exact:true}).selectOption(scene);await ready();
     await page.getByLabel('Resolution',{exact:true}).selectOption('800');await ready();
