@@ -1,6 +1,6 @@
 import { chromium } from '@playwright/test';
 import { spawn } from 'node:child_process';
-import { mkdir } from 'node:fs/promises';
+import { mkdir, writeFile } from 'node:fs/promises';
 const url='http://127.0.0.1:5183';
 let server,browser;
 try {
@@ -13,10 +13,10 @@ try {
     await page.getByLabel('Scene',{exact:true}).selectOption(scene);await ready();
     await page.getByLabel('Resolution',{exact:true}).selectOption('800');await ready();
     // Actual canvas element capture; no external artwork, replacement pixels, or simulated interface.
-    await page.locator('canvas').screenshot({path:`examples/${scene}.png`});
+    await writeFile(`examples/${scene}.png`, Buffer.from((await page.locator('canvas').evaluate(canvas => canvas.toDataURL('image/png'))).split(',')[1], 'base64'));
     await page.locator('.image-rasterizer').screenshot({path:`examples/${scene}-interface.png`});
     if(scene==='torus'){
-      await page.getByLabel('Render view',{exact:true}).selectOption('wireframe');await ready();await page.locator('canvas').screenshot({path:'examples/torus-wireframe.png'});
+      await page.getByLabel('Render view',{exact:true}).selectOption('wireframe');await ready();await writeFile('examples/torus-wireframe.png', Buffer.from((await page.locator('canvas').evaluate(canvas => canvas.toDataURL('image/png'))).split(',')[1], 'base64'));
       await page.getByLabel('Render view',{exact:true}).selectOption('shaded');await ready();
     }
   }

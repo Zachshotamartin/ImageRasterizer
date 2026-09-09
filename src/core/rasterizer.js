@@ -3,7 +3,6 @@ import { clamp, edge, isTopLeft, normalize, perspectiveWeights, barycentric, rot
 import { sampleTexture, createChecker } from './texture.js';
 export const RENDER_LIMITS={maxWidth:800,maxHeight:600,maxTriangles:2000,maxCandidates:24_000_000};
 const LIGHT=normalize([-.4,.75,1]);
-const BACKGROUND=[20,35,33];
 export function transformTriangles(triangles,{yaw=0,pitch=0,distance=6,aspect=4/3}={}) {
   return triangles.map(tri=>tri.map(v=>{const p=rotate(v.p,yaw,pitch),n=rotate(v.a.slice(5,8),yaw,pitch);p[2]-=distance;return {p:project(p,aspect),a:[...v.a.slice(0,5),...n]};}));
 }
@@ -12,7 +11,7 @@ export function rasterize(clipTriangles,{width=480,height=360,mode='shaded',pers
   if(clipTriangles.length>RENDER_LIMITS.maxTriangles)throw Error('The renderer supports at most 2,000 input triangles.');
   const start=performance.now(),rgba=new Uint8ClampedArray(width*height*4),depth=new Float32Array(width*height),ids=new Int32Array(width*height);
   depth.fill(Infinity);ids.fill(-1);
-  for(let i=0;i<width*height;i++)rgba.set([...BACKGROUND,255],i*4);
+  // Pixels without covered geometry remain transparent, including PNG exports.
   const triangles=[];let candidates=0,coveredSamples=0,depthPasses=0;
   const tex=texture||createChecker();
   for(let source=0;source<clipTriangles.length;source++)for(const tri of clipTriangle(clipTriangles[source])) {
