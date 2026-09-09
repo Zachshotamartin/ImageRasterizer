@@ -3,7 +3,7 @@ import { clamp, edge, isTopLeft, normalize, perspectiveWeights, barycentric, rot
 import { sampleTexture, createChecker } from './texture.js';
 export const RENDER_LIMITS={maxWidth:800,maxHeight:600,maxTriangles:2000,maxCandidates:24_000_000};
 const LIGHT=normalize([-.4,.75,1]);
-const BACKGROUND=[24,43,38];
+const BACKGROUND=[20,35,33];
 export function transformTriangles(triangles,{yaw=0,pitch=0,distance=6,aspect=4/3}={}) {
   return triangles.map(tri=>tri.map(v=>{const p=rotate(v.p,yaw,pitch),n=rotate(v.a.slice(5,8),yaw,pitch);p[2]-=distance;return {p:project(p,aspect),a:[...v.a.slice(0,5),...n]};}));
 }
